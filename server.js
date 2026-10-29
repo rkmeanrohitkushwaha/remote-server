@@ -3,10 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer, WebSocket } = require('ws');
 
-// Use port provided by Cloud provider (Render, Railway, etc.) or default to 8080
 const PORT = process.env.PORT || 8080;
 
-// 1. HTTP Server to serve client.html
+// HTTP Server serving client.html
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/client.html') {
     const filePath = path.join(__dirname, 'client.html');
@@ -24,29 +23,21 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// 2. WebSocket Server on top of HTTP
+// WebSocket Server
 const wss = new WebSocketServer({ server });
 
-// Map of sessionId -> { hostWs, clientWs }
-const sessions = new Map();
-
-function generateSessionId() {
-  let id;
-  do {
-    id = Math.floor(100000 + Math.random() * 900000).toString();
-  } while (sessions.has(id));
-  return id;
-}
+// Map of hostId -> { hostWs, clientWs, password }
+const hosts = new Map();
 
 wss.on('connection', (ws) => {
-  ws.sessionId = null;
+  ws.hostId = null;
   ws.role = null;
 
   ws.on('message', (message, isBinary) => {
-    // Binary messages are JPEG frames sent from Host -> Client
+    // Binary screen frame (Host -> Client)
     if (isBinary) {
-      if (ws.role === 'host' && ws.sessionId) {
-        const session = sessions.get(ws.sessionId);
+      if (ws.role === 'host' && ws.hostId) {
+        const session = hosts.get(ws.hostId);
         if (session && session.clientWs && session.clientWs.readyState === WebSocket.OPEN) {
           session.clientWs.send(message, { binary: true });
         }
@@ -58,62 +49,77 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message.toString());
 
-      // Host registers
+      // 1. Host Registration with User ID and Password
       if (data.type === 'register-host') {
-        const sessionId = generateSessionId();
-        ws.sessionId = sessionId;
-        ws.role = 'host';
-        sessions.set(sessionId, { hostWs: ws, clientWs: null });
+        const { hostId, password } = data;
+        if (!hostId || !password) {
+          return ws.send(JSON.stringify({ type: 'error', message: 'Missing Host ID or Password' }));
+        }
 
-        ws.send(JSON.stringify({ type: 'host-registered', sessionId }));
-        console.log(`[+] Host registered with Session ID: ${sessionId}`);
+        ws.hostId = hostId.replace(/\s+/g, '');
+        ws.role = 'host';
+        hosts.set(ws.hostId, { hostWs: ws, clientWs: null, password: password.toString() });
+
+        ws.send(JSON.stringify({ type: 'host-registered', hostId: ws.hostId }));
+        console.log(`[+] Host registered: ID=${ws.hostId}`);
       }
 
-      // Client joins using 6-digit code
+      // 2. Client Connection Request with User ID and Password
       else if (data.type === 'join') {
-        const { sessionId } = data;
-        const session = sessions.get(sessionId);
+        const targetId = (data.hostId || '').replace(/\s+/g, '');
+        const providedPassword = (data.password || '').toString();
+
+        const session = hosts.get(targetId);
 
         if (!session || !session.hostWs || session.hostWs.readyState !== WebSocket.OPEN) {
           return ws.send(JSON.stringify({
-            type: 'error',
-            message: 'Session ID not found or Host is offline.'
+            type: 'auth-error',
+            message: 'User ID offline hai ya exist nahi karta.'
           }));
         }
 
-        ws.sessionId = sessionId;
+        // Verify Password
+        if (session.password !== providedPassword) {
+          return ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Galat Password! (Incorrect Password)'
+          }));
+        }
+
+        // Password matched!
+        ws.hostId = targetId;
         ws.role = 'client';
         session.clientWs = ws;
 
-        ws.send(JSON.stringify({ type: 'joined', sessionId }));
+        ws.send(JSON.stringify({ type: 'joined', hostId: targetId }));
         session.hostWs.send(JSON.stringify({ type: 'client-connected' }));
-        console.log(`[+] Client connected to Session ID: ${sessionId}`);
+        console.log(`[+] Client connected to Host ID: ${targetId}`);
       }
 
-      // Input events from Client -> Host
-      else if (ws.role === 'client' && ws.sessionId) {
-        const session = sessions.get(ws.sessionId);
+      // 3. Remote input events (Client -> Host)
+      else if (ws.role === 'client' && ws.hostId) {
+        const session = hosts.get(ws.hostId);
         if (session && session.hostWs && session.hostWs.readyState === WebSocket.OPEN) {
           session.hostWs.send(message.toString());
         }
       }
     } catch (err) {
-      console.error('Error handling message:', err.message);
+      console.error('Message error:', err.message);
     }
   });
 
   ws.on('close', () => {
-    if (!ws.sessionId) return;
-    const session = sessions.get(ws.sessionId);
+    if (!ws.hostId) return;
+    const session = hosts.get(ws.hostId);
 
     if (ws.role === 'host') {
-      console.log(`[-] Host disconnected (Session ${ws.sessionId})`);
+      console.log(`[-] Host offline: ${ws.hostId}`);
       if (session && session.clientWs && session.clientWs.readyState === WebSocket.OPEN) {
         session.clientWs.send(JSON.stringify({ type: 'host-disconnected' }));
       }
-      sessions.delete(ws.sessionId);
+      hosts.delete(ws.hostId);
     } else if (ws.role === 'client') {
-      console.log(`[-] Client disconnected from Session ${ws.sessionId}`);
+      console.log(`[-] Client disconnected from Host: ${ws.hostId}`);
       if (session && session.hostWs && session.hostWs.readyState === WebSocket.OPEN) {
         session.hostWs.send(JSON.stringify({ type: 'client-disconnected' }));
         session.clientWs = null;
@@ -123,8 +129,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`===============================================`);
-  console.log(` Signaling Server running on port: ${PORT}`);
-  console.log(` Ready for Cloud & Worldwide connections!`);
-  console.log(`===============================================`);
+  console.log(`Signaling Server running on port ${PORT}`);
 });
