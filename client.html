@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Desktop Client</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --panel-dark: #1e293b;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --warning: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      background-color: var(--panel-dark);
+      border-bottom: 1px solid #334155;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 15px;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    input#sessionId {
+      background: #0f172a;
+      border: 1px solid #475569;
+      color: #fff;
+      font-size: 1.1rem;
+      padding: 7px 14px;
+      border-radius: 6px;
+      width: 140px;
+      text-align: center;
+      letter-spacing: 3px;
+      font-weight: 600;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input#sessionId:focus {
+      border-color: var(--accent);
+    }
+
+    button {
+      background-color: var(--accent);
+      color: #0f172a;
+      border: none;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.15s, opacity 0.15s;
+    }
+
+    button:hover:not(:disabled) {
+      background-color: var(--accent-hover);
+      color: #fff;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    button.disconnect-btn {
+      background-color: var(--danger);
+      color: #fff;
+    }
+
+    .status-badge {
+      font-size: 0.85rem;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #334155;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .status-dot.online { background: var(--success); }
+    .status-dot.connecting { background: var(--warning); }
+    .status-dot.offline { background: var(--danger); }
+
+    main {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      overflow: hidden;
+    }
+
+    canvas#screenCanvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      cursor: default;
+      display: block;
+      background: #000;
+    }
+
+    #overlayMessage {
+      position: absolute;
+      text-align: center;
+      color: var(--text-muted);
+      pointer-events: none;
+      font-size: 1.1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+      </svg>
+      RemoteDesk
+    </div>
+
+    <div class="controls">
+      <input type="text" id="sessionId" maxlength="6" placeholder="000000" autocomplete="off" />
+      <button id="connectBtn">Connect</button>
+      <button id="disconnectBtn" class="disconnect-btn" style="display: none;">Disconnect</button>
+      <button id="fullscreenBtn" style="display: none;">Fullscreen</button>
+    </div>
+
+    <div class="status-badge">
+      <span class="status-dot offline" id="statusDot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+  </header>
+
+  <main id="mainContainer">
+    <canvas id="screenCanvas" tabindex="0"></canvas>
+    <div id="overlayMessage">Enter a 6-digit Host Session ID to start remote control.</div>
+  </main>
+
+  <script>
+    const canvas = document.getElementById('screenCanvas');
+    const ctx = canvas.getContext('2d');
+    const sessionInput = document.getElementById('sessionId');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const overlayMessage = document.getElementById('overlayMessage');
+    const mainContainer = document.getElementById('mainContainer');
+
+    let ws = null;
+    let connected = false;
+    let lastMouseMoveTime = 0;
+
+    function setStatus(state, message) {
+      statusDot.className = 'status-dot ' + state;
+      statusText.textContent = message;
+    }
+
+    function connect() {
+      const sessionId = sessionInput.value.trim();
+      if (!sessionId || sessionId.length !== 6) {
+        alert('Please enter a valid 6-digit session ID.');
+        return;
+      }
+
+      setStatus('connecting', 'Connecting...');
+      connectBtn.disabled = true;
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host || 'localhost:8080'}`;
+
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'join', sessionId }));
+      };
+
+      ws.onmessage = async (event) => {
+        // Binary JPEG screen frame
+        if (event.data instanceof ArrayBuffer) {
+          try {
+            const blob = new Blob([event.data], { type: 'image/jpeg' });
+            const bitmap = await createImageBitmap(blob);
+
+            if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+            }
+
+            ctx.drawImage(bitmap, 0, 0);
+            bitmap.close();
+
+            if (overlayMessage.style.display !== 'none') {
+              overlayMessage.style.display = 'none';
+            }
+          } catch (e) {
+            // Frame decode error
+          }
+          return;
+        }
+
+        // JSON message
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'joined') {
+            connected = true;
+            setStatus('online', `Connected: ${msg.sessionId}`);
+            connectBtn.style.display = 'none';
+            disconnectBtn.style.display = 'inline-block';
+            fullscreenBtn.style.display = 'inline-block';
+            sessionInput.disabled = true;
+            canvas.focus();
+          } else if (msg.type === 'error') {
+            alert(msg.message);
+            disconnect();
+          } else if (msg.type === 'host-disconnected') {
+            alert('Host has closed the session.');
+            disconnect();
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        disconnect();
+      };
+
+      ws.onerror = () => {
+        setStatus('offline', 'Connection Error');
+      };
+    }
+
+    function disconnect() {
+      connected = false;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      setStatus('offline', 'Disconnected');
+      connectBtn.disabled = false;
+      connectBtn.style.display = 'inline-block';
+      disconnectBtn.style.display = 'none';
+      fullscreenBtn.style.display = 'none';
+      sessionInput.disabled = false;
+      overlayMessage.style.display = 'block';
+      overlayMessage.textContent = 'Disconnected from host.';
+    }
+
+    function sendEvent(obj) {
+      if (connected && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(obj));
+      }
+    }
+
+    function getNormalizedCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      return {
+        x: Math.max(0, Math.min(1, x)),
+        y: Math.max(0, Math.min(1, y))
+      };
+    }
+
+    // Mouse Movement with ~30ms throttling
+    canvas.addEventListener('mousemove', (e) => {
+      if (!connected) return;
+      const now = performance.now();
+      if (now - lastMouseMoveTime < 30) return;
+      lastMouseMoveTime = now;
+
+      const { x, y } = getNormalizedCoords(e);
+      sendEvent({ type: 'mousemove', x, y });
+    });
+
+    // Mouse Down / Up
+    canvas.addEventListener('mousedown', (e) => {
+      if (!connected) return;
+      canvas.focus();
+      const { x, y } = getNormalizedCoords(e);
+      sendEvent({ type: 'mousedown', button: e.button, x, y });
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (!connected) return;
+      const { x, y } = getNormalizedCoords(e);
+      sendEvent({ type: 'mouseup', button: e.button, x, y });
+    });
+
+    // Disable browser right-click context menu over screen
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Keyboard events
+    window.addEventListener('keydown', (e) => {
+      if (!connected || document.activeElement === sessionInput) return;
+      // Prevent browser shortcuts like Tab navigation or scrolling with Space/Arrows
+      if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+      }
+      sendEvent({ type: 'keydown', code: e.code, key: e.key });
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (!connected || document.activeElement === sessionInput) return;
+      sendEvent({ type: 'keyup', code: e.code, key: e.key });
+    });
+
+    // UI Buttons
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+    sessionInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') connect();
+    });
+
+    fullscreenBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        mainContainer.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen();
+      }
+    });
+  </script>
+</body>
+</html>
