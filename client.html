@@ -9,8 +9,7 @@
       --anydesk-red: #ef4444;
       --anydesk-red-hover: #dc2626;
       --anydesk-dark: #12141a;
-      --toolbar-bg: rgba(23, 27, 38, 0.95);
-      --card-bg: #1a1e29;
+      --toolbar-bg: rgba(23, 27, 38, 0.98);
       --border: #2b3244;
       --text: #ffffff;
       --text-muted: #9ba3b4;
@@ -33,10 +32,9 @@
       overflow: hidden;
     }
 
-    /* AnyDesk Floating Top Header */
+    /* AnyDesk Top Navigation */
     header {
       background-color: var(--toolbar-bg);
-      backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
       padding: 8px 18px;
       display: flex;
@@ -51,7 +49,6 @@
       gap: 10px;
       font-size: 1.15rem;
       font-weight: 800;
-      letter-spacing: -0.5px;
     }
 
     .anydesk-logo {
@@ -96,7 +93,6 @@
       outline: none;
       font-family: monospace;
       font-weight: 700;
-      transition: border-color 0.2s;
     }
     .input-field:focus {
       border-color: var(--anydesk-red);
@@ -113,7 +109,6 @@
       letter-spacing: 1px;
     }
 
-    /* AnyDesk Toolbar Buttons */
     .btn {
       background: #252b3b;
       border: 1px solid var(--border);
@@ -130,7 +125,6 @@
     }
     .btn:hover:not(:disabled) {
       background: #2f374c;
-      border-color: #3f4964;
     }
     .btn:disabled {
       opacity: 0.5;
@@ -151,14 +145,13 @@
       border-color: #b91c1c;
     }
 
-    /* In-Session Feature Toolbar */
     .session-toolbar {
       display: none;
       align-items: center;
       gap: 6px;
     }
 
-    /* Main Screen Viewport */
+    /* Screen Container */
     main {
       flex: 1;
       position: relative;
@@ -175,6 +168,7 @@
       object-fit: contain;
       cursor: default;
       display: block;
+      background: #000;
     }
 
     #overlayMessage {
@@ -187,7 +181,7 @@
       line-height: 1.6;
     }
 
-    /* In-Session Chat Drawer (AnyDesk Style) */
+    /* Chat Drawer */
     .chat-drawer {
       position: fixed;
       top: 50px;
@@ -202,9 +196,7 @@
       z-index: 30;
       box-shadow: -4px 0 20px rgba(0,0,0,0.5);
     }
-    .chat-drawer.open {
-      right: 0;
-    }
+    .chat-drawer.open { right: 0; }
 
     .chat-header {
       padding: 12px 16px;
@@ -261,7 +253,6 @@
       outline: none;
     }
 
-    /* Notification Banner */
     #errorBanner {
       display: none;
       position: fixed;
@@ -297,7 +288,6 @@
 
     <!-- In-Session Toolbar -->
     <div class="session-toolbar" id="sessionToolbar">
-      <!-- Chat Toggle -->
       <button class="btn" id="toggleChatBtn">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -305,7 +295,6 @@
         Chat
       </button>
 
-      <!-- Lock Workstation Action -->
       <button class="btn" id="actionLockBtn">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -314,14 +303,12 @@
         Lock PC
       </button>
 
-      <!-- Fullscreen -->
       <button class="btn" id="fullscreenBtn">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
         </svg>
       </button>
 
-      <!-- Disconnect -->
       <button class="btn btn-disconnect" id="disconnectBtn">Disconnect</button>
     </div>
   </header>
@@ -330,7 +317,7 @@
 
   <!-- Screen View -->
   <main id="mainContainer">
-    <canvas id="screenCanvas" tabindex="0"></canvas>
+    <canvas id="screenCanvas" width="1280" height="720" tabindex="0"></canvas>
     <div id="overlayMessage">
       Enter the <strong>AnyDesk Address</strong> and <strong>Password</strong> of the remote computer to connect.
     </div>
@@ -339,11 +326,11 @@
   <!-- In-Session Chat Drawer -->
   <div class="chat-drawer" id="chatDrawer">
     <div class="chat-header">
-      <span>AnyDesk In-Session Chat</span>
+      <span>AnyDesk Session Chat</span>
       <button class="btn" style="padding: 2px 8px;" id="closeChatBtn">✕</button>
     </div>
     <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg remote">Welcome to AnyDesk session chat. Type your message below.</div>
+      <div class="chat-msg remote">Welcome to AnyDesk chat. Type your message below.</div>
     </div>
     <div class="chat-input-bar">
       <input type="text" class="chat-input" id="chatInput" placeholder="Write a message..." autocomplete="off" />
@@ -382,7 +369,6 @@
       setTimeout(() => { errorBanner.style.display = 'none'; }, 4000);
     }
 
-    // Auto format Address input with spaces (123 456 789)
     userInput.addEventListener('input', (e) => {
       let raw = e.target.value.replace(/\D/g, '').substring(0, 9);
       let formatted = '';
@@ -420,34 +406,49 @@
       };
 
       ws.onmessage = async (event) => {
-        // Binary JPEG screen frame
-        if (event.data instanceof ArrayBuffer) {
+        // Binary JPEG frame
+        if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
           try {
-            const blob = new Blob([event.data], { type: 'image/jpeg' });
-            const bitmap = await createImageBitmap(blob);
-
-            if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-              canvas.width = bitmap.width;
-              canvas.height = bitmap.height;
+            const blob = event.data instanceof Blob ? event.data : new Blob([event.data], { type: 'image/jpeg' });
+            
+            if ('createImageBitmap' in window) {
+              const bitmap = await createImageBitmap(blob);
+              if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+              }
+              ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+            } else {
+              const img = new Image();
+              img.onload = () => {
+                if (canvas.width !== img.width || canvas.height !== img.height) {
+                  canvas.width = img.width;
+                  canvas.height = img.height;
+                }
+                ctx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(img.src);
+              };
+              img.src = URL.createObjectURL(blob);
             }
-
-            ctx.drawImage(bitmap, 0, 0);
-            bitmap.close();
 
             if (overlayMessage.style.display !== 'none') {
               overlayMessage.style.display = 'none';
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Frame error:', e);
+          }
           return;
         }
 
-        // Control & Chat messages
+        // JSON message
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'joined') {
             connected = true;
             loginControls.style.display = 'none';
             sessionToolbar.style.display = 'flex';
+            overlayMessage.textContent = 'Receiving video stream...';
             canvas.focus();
           } else if (msg.type === 'auth-error') {
             showError(msg.message);
@@ -457,9 +458,7 @@
             disconnect();
           } else if (msg.type === 'chat-message') {
             addChatMessage(msg.text, 'remote');
-            if (!chatDrawer.classList.contains('open')) {
-              chatDrawer.classList.add('open');
-            }
+            chatDrawer.classList.add('open');
           }
         } catch (e) {}
       };
@@ -491,15 +490,14 @@
 
     function getNormalizedCoords(e) {
       const rect = canvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
+      const x = (e.clientX - rect.left) / (rect.width || 1);
+      const y = (e.clientY - rect.top) / (rect.height || 1);
       return {
         x: Math.max(0, Math.min(1, x)),
         y: Math.max(0, Math.min(1, y))
       };
     }
 
-    // Input handlers
     canvas.addEventListener('mousemove', (e) => {
       if (!connected) return;
       const now = performance.now();
@@ -537,7 +535,6 @@
       sendEvent({ type: 'keyup', code: e.code, key: e.key });
     });
 
-    // Chat functionality
     function addChatMessage(text, sender) {
       const el = document.createElement('div');
       el.className = `chat-msg ${sender}`;
@@ -554,18 +551,11 @@
       chatInput.value = '';
     }
 
-    toggleChatBtn.addEventListener('click', () => {
-      chatDrawer.classList.toggle('open');
-    });
-    closeChatBtn.addEventListener('click', () => {
-      chatDrawer.classList.remove('open');
-    });
+    toggleChatBtn.addEventListener('click', () => { chatDrawer.classList.toggle('open'); });
+    closeChatBtn.addEventListener('click', () => { chatDrawer.classList.remove('open'); });
     sendChatBtn.addEventListener('click', sendChat);
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendChat();
-    });
+    chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
-    // Remote Lock Action
     actionLockBtn.addEventListener('click', () => {
       if (confirm('Lock remote computer screen?')) {
         sendEvent({ type: 'remote-action', action: 'lock' });
@@ -574,9 +564,7 @@
 
     connectBtn.addEventListener('click', connect);
     disconnectBtn.addEventListener('click', disconnect);
-    passInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') connect();
-    });
+    passInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
 
     fullscreenBtn.addEventListener('click', () => {
       if (!document.fullscreenElement) {
