@@ -29,9 +29,23 @@ const wss = new WebSocketServer({ server });
 // Map of hostId -> { hostWs, clientWs, password }
 const hosts = new Map();
 
+// 25s Ping/Pong KeepAlive to keep Cloud Proxies (Render) alive 24/7
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 25000);
+
 wss.on('connection', (ws) => {
   ws.hostId = null;
   ws.role = null;
+  ws.isAlive = true;
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
 
   ws.on('message', (message, isBinary) => {
     // Binary screen frame (Host -> Client)
