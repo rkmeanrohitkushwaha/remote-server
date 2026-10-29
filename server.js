@@ -5,7 +5,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 
-// HTTP Server serving client.html
+// HTTP Server serving AnyDesk client.html
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/client.html') {
     const filePath = path.join(__dirname, 'client.html');
@@ -45,26 +45,24 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // JSON control & input messages
+    // JSON control, chat & input messages
     try {
       const data = JSON.parse(message.toString());
 
-      // 1. Host Registration with User ID and Password
+      // 1. Host Registration
       if (data.type === 'register-host') {
         const { hostId, password } = data;
-        if (!hostId || !password) {
-          return ws.send(JSON.stringify({ type: 'error', message: 'Missing Host ID or Password' }));
-        }
+        if (!hostId || !password) return;
 
         ws.hostId = hostId.replace(/\s+/g, '');
         ws.role = 'host';
         hosts.set(ws.hostId, { hostWs: ws, clientWs: null, password: password.toString() });
 
         ws.send(JSON.stringify({ type: 'host-registered', hostId: ws.hostId }));
-        console.log(`[+] Host registered: ID=${ws.hostId}`);
+        console.log(`[+] AnyDesk Host registered: ID=${ws.hostId}`);
       }
 
-      // 2. Client Connection Request with User ID and Password
+      // 2. Client Connection Request
       else if (data.type === 'join') {
         const targetId = (data.hostId || '').replace(/\s+/g, '');
         const providedPassword = (data.password || '').toString();
@@ -74,11 +72,10 @@ wss.on('connection', (ws) => {
         if (!session || !session.hostWs || session.hostWs.readyState !== WebSocket.OPEN) {
           return ws.send(JSON.stringify({
             type: 'auth-error',
-            message: 'User ID offline hai ya exist nahi karta.'
+            message: 'AnyDesk Address offline hai ya exist nahi karta.'
           }));
         }
 
-        // Verify Password
         if (session.password !== providedPassword) {
           return ws.send(JSON.stringify({
             type: 'auth-error',
@@ -86,21 +83,34 @@ wss.on('connection', (ws) => {
           }));
         }
 
-        // Password matched!
         ws.hostId = targetId;
         ws.role = 'client';
         session.clientWs = ws;
 
         ws.send(JSON.stringify({ type: 'joined', hostId: targetId }));
         session.hostWs.send(JSON.stringify({ type: 'client-connected' }));
-        console.log(`[+] Client connected to Host ID: ${targetId}`);
+        console.log(`[+] AnyDesk Client joined Host ID: ${targetId}`);
       }
 
-      // 3. Remote input events (Client -> Host)
+      // 3. Reject Session
+      else if (data.type === 'reject-session' && ws.role === 'host') {
+        const session = hosts.get(ws.hostId);
+        if (session && session.clientWs) {
+          session.clientWs.send(JSON.stringify({ type: 'auth-error', message: 'Host ne connection request reject kar di.' }));
+          session.clientWs = null;
+        }
+      }
+
+      // 4. Two-way In-Session Chat & Remote Actions & Mouse/Keyboard
       else if (ws.role === 'client' && ws.hostId) {
         const session = hosts.get(ws.hostId);
         if (session && session.hostWs && session.hostWs.readyState === WebSocket.OPEN) {
           session.hostWs.send(message.toString());
+        }
+      } else if (ws.role === 'host' && ws.hostId) {
+        const session = hosts.get(ws.hostId);
+        if (session && session.clientWs && session.clientWs.readyState === WebSocket.OPEN) {
+          session.clientWs.send(message.toString());
         }
       }
     } catch (err) {
@@ -129,5 +139,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Signaling Server running on port ${PORT}`);
+  console.log(`AnyDesk Signaling Server running on port ${PORT}`);
 });
